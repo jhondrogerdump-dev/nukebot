@@ -1,4 +1,5 @@
-const { Client, GatewayIntentBits, PermissionsBitField, ChannelType, REST } = require('discord.js');
+const { Client, GatewayIntentBits, PermissionsBitField, ChannelType } = require('discord.js');
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -23,9 +24,15 @@ function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Global error handler to prevent crashing
+process.on('unhandledRejection', (error) => {
+    console.error('Unhandled promise rejection:', error);
+    // Don't crash – just log
+});
+
 client.once('ready', () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
-    console.log(`Bot is ready to nuke!`);
+    console.log(`Bot is ready. Use !nuke in a server with Manage Channels permission.`);
 });
 
 client.on('messageCreate', async (message) => {
@@ -38,17 +45,26 @@ client.on('messageCreate', async (message) => {
     }
 
     const member = message.member;
-    if (!member.permissions.has(PermissionsBitField.Flags.ManageChannels) && !member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-        return message.reply('❌ You need **Manage Channels** or **Administrator** permission to use this command.');
+    if (!member.permissions.has(PermissionsBitField.Flags.ManageChannels) &&
+        !member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+        return message.reply('❌ You need **Manage Channels** or **Administrator** permission.');
+    }
+
+    // Check bot permissions
+    const botMember = guild.members.me;
+    if (!botMember.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
+        return message.reply('❌ I need **Manage Channels** permission to create channels.');
+    }
+    if (!botMember.permissions.has(PermissionsBitField.Flags.MentionEveryone)) {
+        return message.reply('❌ I need **Mention Everyone** permission to send @everyone / @here.');
     }
 
     if (nukingGuilds.has(guild.id)) {
-        return message.reply('⚠️ A nuke operation is already running in this server. Please wait.');
+        return message.reply('⚠️ A nuke operation is already running in this server. Wait.');
     }
 
     nukingGuilds.add(guild.id);
-
-    const replyMsg = await message.reply('💣 **NUKE INITIATED** 💣\nCreating 67 channels and sending 10 mass pings in each...');
+    const replyMsg = await message.reply('💣 **NUKE INITIATED** – creating 67 channels with 10 mass pings each...');
 
     let createdChannels = 0;
     let failedChannels = 0;
@@ -60,35 +76,57 @@ client.on('messageCreate', async (message) => {
         const channelName = cycle === 0 ? baseName : `${baseName}-${cycle + 1}`;
 
         try {
-            const newChannel = await guild.channels.create({
-                name: channelName,
-                type: ChannelType.GuildText,
-                reason: 'Nuke by ' + message.author.tag
-            });
+            // Create channel with a small retry mechanism
+            let newChannel = null;
+            for (let attempt = 0; attempt < 3; attempt++) {
+                try {
+                    newChannel = await guild.channels.create({
+                        name: channelName,
+                        type: ChannelType.GuildText,
+                        reason: `Nuke by ${message.author.tag}`
+                    });
+                    break;
+                } catch (err) {
+                    if (attempt === 2) throw err;
+                    await delay(2000);
+                }
+            }
 
-            console.log(`✅ Created channel #${channelName}`);
+            if (!newChannel) throw new Error('Channel creation failed after retries');
 
-            // Send 10 pings in the new channel
+            console.log(`✅ Created #${channelName}`);
+
+            // Wait a bit for Discord to fully register the channel
+            await delay(1000);
+
+            // Send 10 pings
             for (let pingCount = 0; pingCount < 10; pingCount++) {
                 try {
                     await newChannel.send(pingMessage);
-                    await delay(200); // small delay between messages
                 } catch (sendErr) {
-                    console.error(`Failed to send message in ${channelName}:`, sendErr.message);
+                    console.error(`Failed to send ping #${pingCount + 1} in ${channelName}:`, sendErr.message);
+                    // Continue with next ping
                 }
+                await delay(500); // longer delay between pings to avoid rate limits
             }
+
             createdChannels++;
-            await delay(800); // delay between channel creations to avoid rate limits
+            await delay(1200); // delay between channel creations
 
         } catch (err) {
-            console.error(`❌ Failed to create channel ${channelName}:`, err.message);
+            console.error(`❌ Failed to create ${channelName}:`, err.message);
             failedChannels++;
+            // If rate limited, wait extra
+            if (err.status === 429) {
+                const retryAfter = err.retryAfter || 5;
+                console.log(`Rate limited – waiting ${retryAfter}s`);
+                await delay(retryAfter * 1000);
+            }
         }
     }
 
     nukingGuilds.delete(guild.id);
-
-    await replyMsg.edit(`🎉 **NUKE COMPLETE** 🎉\n✅ Created: ${createdChannels} channels\n❌ Failed: ${failedChannels} channels\n💥 All channels received 10 mass pings.`);
+    await replyMsg.edit(`🎉 **NUKE COMPLETE**\n✅ Created: ${createdChannels} channels\n❌ Failed: ${failedChannels}\n💥 Each channel received 10 mass pings.`);
 });
 
-client.login(process.env.TOKEN);
+client.login(process.env.TOKEN); 
