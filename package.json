@@ -1,16 +1,15 @@
 {
-  "name": "discord-nuke-fly",
+  "name": "discord-nuke-bot",
   "version": "1.0.0",
-  "description": "Discord nuke bot with spam, for Fly.io",
+  "description": "Discord nuke bot for Railway - creates 67 channels and mass pings",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "discord.js": "^14.14.1",
-    "dotenv": "^16.3.1"
+    "discord.js": "^14.14.1"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=16.9.0"
   }
 }
